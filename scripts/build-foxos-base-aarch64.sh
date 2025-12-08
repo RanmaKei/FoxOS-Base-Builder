@@ -102,7 +102,15 @@ fi
 
 echo "[FOXOS-BUILDER] QEMU exited successfully; proceeding to sparsify image..."
 export LIBGUESTFS_BACKEND=direct
+
+set +e
 virt-sparsify --in-place "$BASE_IMG"
+RC=$?
+set -e
+
+if [[ $RC -ne 0 ]]; then
+  echo "[FOXOS-BUILDER] WARNING: virt-sparsify failed (rc=$RC), continuing with non-sparsified image."
+fi
 
 echo "[FOXOS-BUILDER] Done. Final aarch64 image:"
 qemu-img info "$BASE_IMG"

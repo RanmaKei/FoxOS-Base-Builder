@@ -28,11 +28,9 @@ virt-install \
   --wait=-1 \
   --noreboot
 
-echo "[FOXOS-BUILDER] Sparsifying x86_64 image..."
-export LIBGUESTFS_BACKEND=direct
 
 set +e
-virt-sparsify --in-place "$BASE_IMG"
+virt-sparsify --in-place "$IMG"
 RC=$?
 set -e
 
