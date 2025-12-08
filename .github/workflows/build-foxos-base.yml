@@ -34,6 +34,7 @@ jobs:
         run: |
           chmod +x scripts/build-foxos-base-x86_64.sh
           chmod +x scripts/build-foxos-base-aarch64.sh
+          sudo chmod +r /boot/vmlinuz-*
 
       - name: Build FoxOS base image (${{ matrix.arch }})
         # For aarch64, the script will respect BUILD_TIMEOUT_MINUTES
