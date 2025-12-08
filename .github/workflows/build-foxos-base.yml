@@ -4,11 +4,8 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  build-base:
+  build-base-x86_64:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64]
 
     steps:
       - name: Checkout
@@ -22,18 +19,13 @@ jobs:
       - name: Make build scripts executable
         run: |
           chmod +x scripts/build-foxos-base-x86_64.sh
-          chmod +x scripts/build-foxos-base-aarch64.sh
 
-      - name: Build FoxOS base image
+      - name: Build FoxOS base image (x86_64)
         run: |
-          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
-            scripts/build-foxos-base-x86_64.sh
-          else
-            scripts/build-foxos-base-aarch64.sh
-          fi
+          scripts/build-foxos-base-x86_64.sh
 
-      - name: Upload qcow2 artifact
+      - name: Upload qcow2 artifact (x86_64)
         uses: actions/upload-artifact@v4
         with:
-          name: FoxOS-Base-${{ matrix.arch }}
-          path: output/FoxOS-Base-${{ matrix.arch }}.qcow2
+          name: FoxOS-Base-x86_64
+          path: output/FoxOS-Base-x86_64.qcow2
