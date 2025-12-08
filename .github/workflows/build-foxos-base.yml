@@ -6,7 +6,11 @@ on:
 jobs:
   build-base:
     runs-on: ubuntu-latest
+    # Hard cap so a truly wedged job can't burn all your minutes
+    timeout-minutes: 120
+
     strategy:
+      fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
 
@@ -17,11 +21,14 @@ jobs:
       - name: Install virtualization & image tools
         run: |
           sudo apt-get update
-          # x86_64 virt-install deps
-          sudo apt-get install -y qemu-kvm libvirt-daemon-system virtinst
-          # QEMU + cloud-init tools for aarch64 emulation
-          sudo apt-get install -y qemu-system-arm qemu-utils cloud-image-utils
-          sudo apt-get install -y libguestfs-tools
+
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            echo "[CI] Installing x86_64 virtualization toolchain..."
+            sudo apt-get install -y qemu-kvm libvirt-daemon-system virtinst libguestfs-tools
+          else
+            echo "[CI] Installing aarch64 emulation + image toolchain..."
+            sudo apt-get install -y qemu-system-arm qemu-utils cloud-image-utils libguestfs-tools
+          fi
 
       - name: Make build scripts executable
         run: |
@@ -29,6 +36,9 @@ jobs:
           chmod +x scripts/build-foxos-base-aarch64.sh
 
       - name: Build FoxOS base image (${{ matrix.arch }})
+        # For aarch64, the script will respect BUILD_TIMEOUT_MINUTES
+        env:
+          BUILD_TIMEOUT_MINUTES: 45
         run: |
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             echo "[CI] Building x86_64 base image..."
@@ -38,8 +48,25 @@ jobs:
             scripts/build-foxos-base-aarch64.sh
           fi
 
+      # Optional but highly recommended: compress before upload so
+      # you're not shipping a 16G sparse file as-is.
+      - name: Compress qcow2 artifact (${{ matrix.arch }})
+        run: |
+          mkdir -p output
+          SRC="output/FoxOS-Base-${{ matrix.arch }}.qcow2"
+          DST="output/FoxOS-Base-${{ matrix.arch }}-compressed.qcow2"
+
+          if [[ ! -f "$SRC" ]]; then
+            echo "[CI] ERROR: Expected qcow2 not found: $SRC" >&2
+            exit 1
+          fi
+
+          echo "[CI] Compressing $SRC -> $DST ..."
+          qemu-img convert -O qcow2 -c "$SRC" "$DST"
+          ls -lh output
+
       - name: Upload qcow2 artifact (${{ matrix.arch }})
         uses: actions/upload-artifact@v4
         with:
           name: FoxOS-Base-${{ matrix.arch }}
-          path: output/FoxOS-Base-${{ matrix.arch }}.qcow2
+          path: output/FoxOS-Base-${{ matrix.arch }}-compressed.qcow2

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+BUILD_TIMEOUT_MINUTES="${BUILD_TIMEOUT_MINUTES:-45}"
+BUILD_TIMEOUT_SECONDS=$(( BUILD_TIMEOUT_MINUTES * 60 ))
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTDIR="$ROOT_DIR/output"
 
@@ -60,7 +63,12 @@ chpasswd:
 runcmd:
   - [ bash, -c, 'echo "[FOXOS] ARM base provisioning via cloud-init..."' ]
   - [ bash, -c, 'touch /var/lib/foxos-base-built' ]
-  - [ bash, -c, 'shutdown -h now' ]
+
+power_state:
+  mode: poweroff
+  message: "FoxOS ARM base provisioning complete – powering off"
+  timeout: 30
+  condition: true
 EOF
 
 cat > "$META_DATA" <<EOF
@@ -73,9 +81,9 @@ cloud-localds "$SEED_IMG" "$USER_DATA" "$META_DATA"
 
 # ---------- Boot once under QEMU (emulated ARM) ----------
 echo "[FOXOS-BUILDER] Booting QEMU aarch64 to apply cloud-init..."
-echo "  This can take a while; VM will power off at the end."
+echo "  Timeout: ${BUILD_TIMEOUT_MINUTES} minutes. VM should power off on its own."
 
-qemu-system-aarch64 \
+if ! timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -machine virt \
   -cpu cortex-a72 \
   -m 2048 \
@@ -86,8 +94,13 @@ qemu-system-aarch64 \
   -device virtio-net-device,netdev=net0 \
   -serial mon:stdio \
   -no-reboot
+then
+  echo "[FOXOS-BUILDER] ERROR: QEMU timed out after ${BUILD_TIMEOUT_MINUTES} minutes." >&2
+  echo "[FOXOS-BUILDER] The guest likely failed to boot or cloud-init did not power off." >&2
+  exit 1
+fi
 
-echo "[FOXOS-BUILDER] Sparsifying aarch64 image..."
+echo "[FOXOS-BUILDER] QEMU exited successfully; proceeding to sparsify image..."
 export LIBGUESTFS_BACKEND=direct
 virt-sparsify --in-place "$BASE_IMG"
 
