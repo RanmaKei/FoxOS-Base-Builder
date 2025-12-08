@@ -41,9 +41,7 @@ trap 'rm -rf "$SEED_DIR"' EXIT
 USER_DATA="$SEED_DIR/user-data"
 META_DATA="$SEED_DIR/meta-data"
 
-# IMPORTANT: use the same hash you used for 'yipyip'
-# Generate with:  openssl passwd -6 'yipyip'
-FOXOS_PASS_HASH='$6$M0fdzC5Gc/a3srzn$dYc9zK64ZXsOUlSl73NzI349quHidm1O0Yp83zF1Xmjwsw3gTRqJqWIqRe7fHfae.xz0qDIPsko2sV885XwkM/'
+FOXOS_PASS_HASH='$6$aTsl7oq3GQkz7eGq$osmaiVfI6rOuhmmhONMtxpLt8IqPnPmtTQUINUY4erWDFa6iDVJfK3xXngVM1aQBXvxbpVtoqhSvL07Dvypkj1'
 
 cat > "$USER_DATA" <<EOF
 #cloud-config
