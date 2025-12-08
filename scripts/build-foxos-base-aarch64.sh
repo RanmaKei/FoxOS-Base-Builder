@@ -21,7 +21,7 @@ virt-install \
   --machine virt \
   --ram 2048 \
   --vcpus 2 \
-  --disk path="$IMG",size=20,format=qcow2 \
+  --disk path="$IMG",size=16,format=qcow2 \
   --os-variant fedora-unknown \
   --location "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Everything/aarch64/os/" \
   --initrd-inject="$KS" \
