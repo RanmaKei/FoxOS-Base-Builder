@@ -89,5 +89,12 @@ qemu-system-aarch64 \
   -serial mon:stdio \
   -no-reboot
 
+echo "[FOXOS-BUILDER] Sparsifying aarch64 image..."
+export LIBGUESTFS_BACKEND=direct
+virt-sparsify --in-place "$BASE_IMG"
+
+echo "[FOXOS-BUILDER] Done. Final aarch64 image:"
+qemu-img info "$BASE_IMG"
+
 echo "[FOXOS-BUILDER] QEMU finished. FoxOS ARM base image ready:"
 echo "  $BASE_IMG"

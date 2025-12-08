@@ -21,6 +21,7 @@ jobs:
           sudo apt-get install -y qemu-kvm libvirt-daemon-system virtinst
           # QEMU + cloud-init tools for aarch64 emulation
           sudo apt-get install -y qemu-system-arm qemu-utils cloud-image-utils
+          sudo apt-get install -y libguestfs-tools
 
       - name: Make build scripts executable
         run: |

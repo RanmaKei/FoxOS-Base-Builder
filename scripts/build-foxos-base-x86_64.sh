@@ -28,4 +28,12 @@ virt-install \
   --wait=-1 \
   --noreboot
 
+echo "[FOXOS-BUILDER] Sparsifying x86_64 image..."
+# libguestfs sometimes needs this hint in CI
+export LIBGUESTFS_BACKEND=direct
+virt-sparsify --in-place "$IMG"
+
+echo "[FOXOS-BUILDER] Done. Final x86_64 image:"
+qemu-img info "$IMG"
+
 echo "[FOXOS-BUILDER] Build complete. Image at: $IMG"
