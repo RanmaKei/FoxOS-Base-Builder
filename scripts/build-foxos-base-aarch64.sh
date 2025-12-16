@@ -6,35 +6,152 @@ BUILD_TIMEOUT_SECONDS=$(( BUILD_TIMEOUT_MINUTES * 60 ))
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTDIR="$ROOT_DIR/output"
-
 mkdir -p "$OUTDIR"
 
-# 1) Upstream Fedora Cloud Base qcow2 (aarch64)
-CLOUD_URL="https://archives.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/aarch64/images/Fedora-Cloud-Base-Generic-42-1.1.aarch64.qcow2"
-CLOUD_SRC="$OUTDIR/Fedora-Cloud-Base-Generic-42-1.1.aarch64.qcow2"
+# Upstream Fedora Cloud image directory (contains versioned qcow2 files)
+CLOUD_DIR_URL="https://archives.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/aarch64/images/"
 
-# 2) Our final base image
+# Final artifact
 BASE_IMG="$OUTDIR/FoxOS-Base-aarch64.qcow2"
+BASE_HASHFILE="$BASE_IMG.sha256"
 
-# 3) Cloud-init seed image
+# Cloud-init seed ISO
 SEED_IMG="$OUTDIR/foxos-seed-aarch64.iso"
 
-echo "[FOXOS-BUILDER] Root dir : $ROOT_DIR"
-echo "[FOXOS-BUILDER] Out dir  : $OUTDIR"
+# Controls
+FORCE_REBUILD="${FORCE_REBUILD:-0}"                  # force rebuild final image
+AUTO_UPDATE_CLOUD="${AUTO_UPDATE_CLOUD:-0}"          # only download when newer exists (CI-friendly)
+FORCE_REDOWNLOAD_CLOUD="${FORCE_REDOWNLOAD_CLOUD:-0}"# always redownload latest (hammer)
 
-# ---------- Fetch Fedora Cloud image ----------
-if [[ ! -f "$CLOUD_SRC" ]]; then
-  echo "[FOXOS-BUILDER] Downloading Fedora Cloud Base aarch64..."
-  echo "  From: $CLOUD_URL"
-  echo "  To  : $CLOUD_SRC"
-  curl -L "$CLOUD_URL" -o "$CLOUD_SRC"
+log(){ echo "[FOXOS-BUILDER] $*"; }
+have_tty(){ [[ -t 0 && -t 1 ]]; }
+
+prompt_yes_5s_default_no() {
+  local msg="$1"
+  log "$msg"
+  if ! have_tty; then
+    log "No TTY detected (CI). Defaulting to NO."
+    return 1
+  fi
+  log "Press 'y' then Enter within 5 seconds to proceed. Timeout/other = NO."
+  local ans=""
+  if read -r -t 5 ans; then
+    [[ "${ans,,}" == "y" ]]
+  else
+    return 1
+  fi
+}
+
+write_hashfile() {
+  local file="$1"
+  local hashfile="$2"
+  (cd "$(dirname "$file")" && sha256sum "$(basename "$file")" > "$(basename "$hashfile")")
+}
+
+verify_hashfile() {
+  local hashfile="$1"
+  sha256sum -c "$hashfile" >/dev/null 2>&1
+}
+
+download_file() {
+  local url="$1"
+  local dest="$2"
+  log "Downloading:"
+  log "  From: $url"
+  log "  To  : $dest"
+  curl -fL --retry 3 --retry-delay 2 "$url" -o "$dest"
+}
+
+get_latest_cloud_filename() {
+  curl -fsSL "$CLOUD_DIR_URL" \
+    | grep -oE 'Fedora-Cloud-Base-Generic-42-[0-9.]+\.aarch64\.qcow2' \
+    | sort -V \
+    | tail -n 1
+}
+
+# ---- Determine latest upstream ----
+LATEST_CLOUD_FILE="$(get_latest_cloud_filename || true)"
+if [[ -z "${LATEST_CLOUD_FILE:-}" ]]; then
+  log "ERROR: Could not determine latest Fedora Cloud qcow2 from:"
+  log "  $CLOUD_DIR_URL"
+  exit 1
+fi
+
+CLOUD_URL="${CLOUD_DIR_URL}${LATEST_CLOUD_FILE}"
+CLOUD_SRC="$OUTDIR/${LATEST_CLOUD_FILE}"
+CLOUD_HASHFILE="$CLOUD_SRC.sha256"
+
+log "Root dir : $ROOT_DIR"
+log "Out dir  : $OUTDIR"
+log "Latest upstream cloud image detected:"
+log "  $CLOUD_URL"
+
+# ---- If final image exists and is verified, skip unless forced ----
+if [[ "$FORCE_REBUILD" != "1" && -f "$BASE_IMG" && -f "$BASE_HASHFILE" ]]; then
+  log "Verifying existing final image: $BASE_HASHFILE"
+  if verify_hashfile "$BASE_HASHFILE"; then
+    log "Final image hash OK. Skipping rebuild."
+    qemu-img info "$BASE_IMG" || true
+    exit 0
+  else
+    log "WARNING: Final image hash FAILED. Will rebuild."
+    rm -f "$BASE_IMG" "$BASE_HASHFILE"
+  fi
+fi
+
+# ---- Decide whether to fetch newest upstream cloud image ----
+need_cloud_download=0
+
+if [[ "$FORCE_REDOWNLOAD_CLOUD" == "1" ]]; then
+  log "FORCE_REDOWNLOAD_CLOUD=1 set: will redownload latest upstream."
+  need_cloud_download=1
 else
-  echo "[FOXOS-BUILDER] Using existing cloud image: $CLOUD_SRC"
+  if [[ -f "$CLOUD_SRC" ]]; then
+    if [[ -f "$CLOUD_HASHFILE" ]]; then
+      log "Verifying existing newest cloud image: $CLOUD_HASHFILE"
+      if verify_hashfile "$CLOUD_HASHFILE"; then
+        log "Cloud image hash OK. Using existing: $CLOUD_SRC"
+      else
+        log "WARNING: Cloud image hash FAILED. Will redownload."
+        need_cloud_download=1
+      fi
+    else
+      log "Newest cloud image exists but no hash file found: $CLOUD_HASHFILE"
+      # Without hash, we can keep it (bandwidth-safe) or prompt to re-download.
+      if prompt_yes_5s_default_no "Redownload newest upstream cloud image to ensure integrity?"; then
+        need_cloud_download=1
+      else
+        log "Using existing newest cloud image (unverified): $CLOUD_SRC"
+      fi
+    fi
+  else
+    # Newest not present locally => "newer version exists" scenario
+    log "Newest upstream image not found locally: $CLOUD_SRC"
+
+    if [[ "$AUTO_UPDATE_CLOUD" == "1" ]]; then
+      log "AUTO_UPDATE_CLOUD=1: will download newer version automatically."
+      need_cloud_download=1
+    else
+      if prompt_yes_5s_default_no "A newer Fedora Cloud image is available (${LATEST_CLOUD_FILE}). Download it now?"; then
+        need_cloud_download=1
+      else
+        log "Not downloading newer upstream image."
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+if [[ "$need_cloud_download" == "1" ]]; then
+  rm -f "$CLOUD_SRC" "$CLOUD_HASHFILE"
+  download_file "$CLOUD_URL" "$CLOUD_SRC"
+  write_hashfile "$CLOUD_SRC" "$CLOUD_HASHFILE"
+  log "Wrote hash: $CLOUD_HASHFILE"
 fi
 
 # ---------- Prepare working base image ----------
-echo "[FOXOS-BUILDER] Creating FoxOS base qcow2..."
-rm -f "$BASE_IMG"
+log "Creating FoxOS base qcow2..."
+rm -f "$BASE_IMG" "$BASE_HASHFILE"
 qemu-img convert -O qcow2 "$CLOUD_SRC" "$BASE_IMG"
 
 # ---------- Build cloud-init seed ----------
@@ -76,12 +193,12 @@ instance-id: foxos-base-aarch64
 local-hostname: foxos-base-aarch64
 EOF
 
-echo "[FOXOS-BUILDER] Creating cloud-init seed image..."
+log "Creating cloud-init seed image..."
 cloud-localds "$SEED_IMG" "$USER_DATA" "$META_DATA"
 
 # ---------- Boot once under QEMU (emulated ARM) ----------
-echo "[FOXOS-BUILDER] Booting QEMU aarch64 to apply cloud-init..."
-echo "  Timeout: ${BUILD_TIMEOUT_MINUTES} minutes. VM should power off on its own."
+log "Booting QEMU aarch64 to apply cloud-init..."
+log "  Timeout: ${BUILD_TIMEOUT_MINUTES} minutes. VM should power off on its own."
 
 if ! timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -machine virt \
@@ -95,25 +212,25 @@ if ! timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -serial mon:stdio \
   -no-reboot
 then
-  echo "[FOXOS-BUILDER] ERROR: QEMU timed out after ${BUILD_TIMEOUT_MINUTES} minutes." >&2
-  echo "[FOXOS-BUILDER] The guest likely failed to boot or cloud-init did not power off." >&2
+  log "ERROR: QEMU timed out after ${BUILD_TIMEOUT_MINUTES} minutes."
+  log "The guest likely failed to boot or cloud-init did not power off."
   exit 1
 fi
 
-echo "[FOXOS-BUILDER] QEMU exited successfully; proceeding to sparsify image..."
+log "QEMU exited successfully; proceeding to sparsify image..."
 export LIBGUESTFS_BACKEND=direct
 
 set +e
 virt-sparsify --in-place "$BASE_IMG"
 RC=$?
 set -e
-
 if [[ $RC -ne 0 ]]; then
-  echo "[FOXOS-BUILDER] WARNING: virt-sparsify failed (rc=$RC), continuing with non-sparsified image."
+  log "WARNING: virt-sparsify failed (rc=$RC), continuing with non-sparsified image."
 fi
 
-echo "[FOXOS-BUILDER] Done. Final aarch64 image:"
-qemu-img info "$BASE_IMG"
+write_hashfile "$BASE_IMG" "$BASE_HASHFILE"
 
-echo "[FOXOS-BUILDER] QEMU finished. FoxOS ARM base image ready:"
-echo "  $BASE_IMG"
+log "Done. Final aarch64 image:"
+qemu-img info "$BASE_IMG"
+log "Final image hash saved: $BASE_HASHFILE"
+log "FoxOS ARM base image ready: $BASE_IMG"

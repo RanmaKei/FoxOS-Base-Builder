@@ -6,7 +6,6 @@ on:
 jobs:
   build-base:
     runs-on: ubuntu-latest
-    # Hard cap so a truly wedged job can't burn all your minutes
     timeout-minutes: 120
 
     strategy:
@@ -24,22 +23,33 @@ jobs:
 
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             echo "[CI] Installing x86_64 virtualization toolchain..."
-            sudo apt-get install -y qemu-kvm libvirt-daemon-system virtinst libguestfs-tools
+            sudo apt-get install -y qemu-kvm libvirt-daemon-system virtinst libguestfs-tools curl
           else
             echo "[CI] Installing aarch64 emulation + image toolchain..."
-            sudo apt-get install -y qemu-system-arm qemu-utils cloud-image-utils libguestfs-tools
+            sudo apt-get install -y qemu-system-arm qemu-utils cloud-image-utils libguestfs-tools curl
           fi
+
+      - name: Ensure libvirt is running (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo systemctl enable --now libvirtd
+          sudo usermod -aG libvirt,kvm "$USER"
+          # Apply group change for this step context:
+          newgrp libvirt <<'EOF'
+          virsh -c qemu:///system list --all || true
+          EOF
 
       - name: Make build scripts executable
         run: |
           chmod +x scripts/build-foxos-base-x86_64.sh
           chmod +x scripts/build-foxos-base-aarch64.sh
-          sudo chmod +r /boot/vmlinuz-*
 
       - name: Build FoxOS base image (${{ matrix.arch }})
-        # For aarch64, the script will respect BUILD_TIMEOUT_MINUTES
         env:
           BUILD_TIMEOUT_MINUTES: 45
+          AUTO_REBUILD_ON_UPSTREAM_CHANGE: "1"  # x86 script
+          AUTO_UPDATE_CLOUD: "1"                # arm script
+
         run: |
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             echo "[CI] Building x86_64 base image..."
@@ -49,8 +59,6 @@ jobs:
             scripts/build-foxos-base-aarch64.sh
           fi
 
-      # Optional but highly recommended: compress before upload so
-      # you're not shipping a 16G sparse file as-is.
       - name: Compress qcow2 artifact (${{ matrix.arch }})
         run: |
           mkdir -p output
