@@ -159,8 +159,8 @@ qemu-img convert -O qcow2 "$CLOUD_SRC" "$BASE_IMG"
 SEED_DIR="$(mktemp -d)"
 trap 'rm -rf "$SEED_DIR"' EXIT
 
-USER_DATA="$SEED_DIR/user-data"
-META_DATA="$SEED_DIR/meta-data"
+USER_DATA="$SEED_DIR/user-data.yaml"
+META_DATA="$SEED_DIR/meta-data.yaml"
 
 FOXOS_PASS_HASH='$6$aTsl7oq3GQkz7eGq$osmaiVfI6rOuhmmhONMtxpLt8IqPnPmtTQUINUY4erWDFa6iDVJfK3xXngVM1aQBXvxbpVtoqhSvL07Dvypkj1'
 

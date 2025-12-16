@@ -1,194 +1,239 @@
 #!/usr/bin/env bash
 set -euo pipefail
+[ -n "${BASH_VERSION:-}" ] || { echo "ERROR: This script must be run with bash." >&2; exit 2; }
+
+BUILD_TIMEOUT_MINUTES="${BUILD_TIMEOUT_MINUTES:-45}"
+BUILD_TIMEOUT_SECONDS=$(( BUILD_TIMEOUT_MINUTES * 60 ))
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTDIR="$ROOT_DIR/output"
-KS_DIR="$ROOT_DIR/ks"
-
-IMG_OUT="$OUTDIR/FoxOS-Base-x86_64.qcow2"          # what you upload
-HASHFILE="$IMG_OUT.sha256"
-
-# Build path for libvirt-qemu (must NOT be under /home/runner in CI)
-IMG_BUILD="${IMG_BUILD:-/var/lib/libvirt/images/FoxOS-Base-x86_64.qcow2}"
-
-KS="$KS_DIR/foxos-base-ks-x86_64.cfg"
-
-FEDORA_URL="https://download.fedoraproject.org/pub/fedora/linux/releases/42/Everything/x86_64/os/"
-TREEINFO_URL="${FEDORA_URL%/}/.treeinfo"
-
-# Stores last-seen upstream signature
-UPSTREAM_STAMP="$OUTDIR/.fedora-treeinfo-x86_64.sha256"
-
 mkdir -p "$OUTDIR"
 
-log() { echo "[FOXOS-BUILDER] $*"; }
-have_tty() { [ -t 0 ] && [ -t 1 ]; }
+# Upstream Fedora Cloud images dir (x86_64)
+CLOUD_DIR_URL="https://archives.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/"
+
+# Final artifact
+BASE_IMG="$OUTDIR/FoxOS-Base-x86_64.qcow2"
+BASE_HASHFILE="$BASE_IMG.sha256"
+
+# Cloud-init seed ISO
+SEED_IMG="$OUTDIR/foxos-seed-x86_64.iso"
 
 # Controls
-FORCE_REBUILD="${FORCE_REBUILD:-0}"                 # always rebuild
-AUTO_REBUILD_ON_UPSTREAM_CHANGE="${AUTO_REBUILD_ON_UPSTREAM_CHANGE:-0}" # CI-friendly: rebuild automatically when upstream changes
+FORCE_REBUILD="${FORCE_REBUILD:-0}"                  # force rebuild final image
+AUTO_UPDATE_CLOUD="${AUTO_UPDATE_CLOUD:-0}"          # CI-friendly: download newer upstream automatically
+FORCE_REDOWNLOAD_CLOUD="${FORCE_REDOWNLOAD_CLOUD:-0}"# always redownload latest upstream
 
-prompt_rebuild_5s_default_no() {
+log() { echo "[FOXOS-BUILDER] $*"; }
+have_tty() { [[ -t 0 && -t 1 ]]; }
+
+prompt_yes_5s_default_no() {
+  local msg="$1"
+  log "$msg"
   if ! have_tty; then
-    log "No TTY detected (CI). Defaulting to NO (keep existing) unless AUTO_REBUILD_ON_UPSTREAM_CHANGE=1."
+    log "No TTY detected (CI). Defaulting to NO."
     return 1
   fi
-
-  log "Press 'y' then Enter within 5 seconds to REBUILD (delete + rebuild)."
-  log "Timeout/anything else = keep existing."
+  log "Press 'y' then Enter within 5 seconds to proceed. Timeout/other = NO."
   local ans=""
   if read -r -t 5 ans; then
     [[ "${ans,,}" == "y" ]]
-    return $?
   else
     return 1
   fi
 }
 
 write_hashfile() {
-  log "Writing hash file: $HASHFILE"
-  (cd "$(dirname "$IMG_OUT")" && sha256sum "$(basename "$IMG_OUT")" > "$(basename "$HASHFILE")")
+  local file="$1" hashfile="$2"
+  (cd "$(dirname "$file")" && sha256sum "$(basename "$file")" > "$(basename "$hashfile")")
 }
 
-verify_local_hash_ok() {
-  [[ -f "$IMG_OUT" && -f "$HASHFILE" ]] && sha256sum -c "$HASHFILE" >/dev/null 2>&1
+verify_hashfile() {
+  local hashfile="$1"
+  sha256sum -c "$hashfile" >/dev/null 2>&1
 }
 
-# Returns:
-# 0 = upstream changed
-# 1 = upstream unchanged OR couldn't check (treated as unchanged for safety)
-upstream_changed() {
-  local new_hash old_hash
-
-  # If network is down or curl missing, don't force rebuild.
-  if ! new_hash="$(curl -fsSL "$TREEINFO_URL" | sha256sum | awk '{print $1}' 2>/dev/null)"; then
-    log "WARNING: Could not fetch $TREEINFO_URL; skipping upstream check."
-    return 1
-  fi
-
-  old_hash=""
-  [[ -f "$UPSTREAM_STAMP" ]] && old_hash="$(cat "$UPSTREAM_STAMP" 2>/dev/null || true)"
-
-  # Always update stamp for next run
-  echo "$new_hash" > "$UPSTREAM_STAMP"
-
-  if [[ -n "$old_hash" && "$new_hash" != "$old_hash" ]]; then
-    return 0
-  fi
-
-  return 1
+download_file() {
+  local url="$1" dest="$2"
+  log "Downloading:"
+  log "  From: $url"
+  log "  To  : $dest"
+  curl -fL --retry 3 --retry-delay 2 "$url" -o "$dest"
 }
 
-build_image() {
-  log "Starting virt-install (x86_64)..."
-  log "Build disk: $IMG_BUILD"
-  log "Output disk: $IMG_OUT"
-
-  # Clean any previous build disk
-  sudo rm -f "$IMG_BUILD"
-  sudo virsh --connect qemu:///system destroy foxos-base-x86_64 >/dev/null 2>&1 || true
-  sudo virsh --connect qemu:///system undefine foxos-base-x86_64 --remove-all-storage >/dev/null 2>&1 || true
-
-
-  sudo virt-install --connect qemu:///system \
-    --name foxos-base-x86_64 \
-    --ram 2048 \
-    --vcpus 2 \
-    --disk path="$IMG_BUILD",size=16,format=qcow2 \
-    --os-variant fedora-unknown \
-    --location "$FEDORA_URL" \
-    --initrd-inject="$KS" \
-    --extra-args="inst.ks=file:/$(basename "$KS") console=ttyS0,115200n8" \
-    --graphics none \
-    --virt-type qemu \
-    --wait=-1 \
-    --noreboot \
-    --noautoconsole
-
-  # Sparsify the build disk (needs sudo because IMG_BUILD is root-owned)
-  set +e
-  sudo virt-sparsify --in-place "$IMG_BUILD"
-  RC=$?
-  set -e
-  if [[ $RC -ne 0 ]]; then
-    log "WARNING: virt-sparsify failed (rc=$RC), continuing with non-sparsified image."
-  fi
-
-  # Copy to workspace output for artifact upload
-  sudo mkdir -p "$OUTDIR"
-  sudo cp -f "$IMG_BUILD" "$IMG_OUT"
-  sudo chown "$(id -u):$(id -g)" "$IMG_OUT"
-
-  log "Final x86_64 image info:"
-  qemu-img info "$IMG_OUT"
-
-  # Guardrail: fail if install clearly didn't happen
-  local bytes
-  bytes="$(stat -c%s "$IMG_OUT")"
-  if (( bytes < 500*1024*1024 )); then
-    log "ERROR: Image is too small (${bytes} bytes). Install likely failed."
-    exit 1
-  fi
-
-  write_hashfile
-  log "Build complete. Image at: $IMG_OUT"
+get_latest_cloud_filename() {
+  curl -fsSL "$CLOUD_DIR_URL" \
+    | grep -oE 'Fedora-Cloud-Base-Generic-42-[0-9.]+\.x86_64\.qcow2' \
+    | sort -V \
+    | tail -n 1
 }
 
-
-# ---- Main flow ----
-
-# Force rebuild overrides everything
-if [[ "$FORCE_REBUILD" == "1" ]]; then
-  log "FORCE_REBUILD=1 set: removing old image + hash."
-  rm -f "$IMG_OUT" "$HASHFILE"
-  build_image
-  exit 0
+# ---- Determine latest upstream ----
+LATEST_CLOUD_FILE="$(get_latest_cloud_filename || true)"
+if [[ -z "${LATEST_CLOUD_FILE:-}" ]]; then
+  log "ERROR: Could not determine latest Fedora Cloud qcow2 from:"
+  log "  $CLOUD_DIR_URL"
+  exit 1
 fi
 
-# If we have a verified local image, only rebuild if upstream changed (and user/CI allows)
-if verify_local_hash_ok; then
-  log "Local image verified OK."
+CLOUD_URL="${CLOUD_DIR_URL}${LATEST_CLOUD_FILE}"
+CLOUD_SRC="$OUTDIR/${LATEST_CLOUD_FILE}"
+CLOUD_HASHFILE="$CLOUD_SRC.sha256"
 
-  if upstream_changed; then
-    log "Upstream Fedora install tree changed since last run."
+log "Out dir  : $OUTDIR"
+log "Latest upstream cloud image detected:"
+log "  $CLOUD_URL"
 
-    if [[ "$AUTO_REBUILD_ON_UPSTREAM_CHANGE" == "1" ]]; then
-      log "AUTO_REBUILD_ON_UPSTREAM_CHANGE=1: rebuilding automatically."
-      rm -f "$IMG_OUT" "$HASHFILE"
-      build_image
-      exit 0
-    fi
-
-    if prompt_rebuild_5s_default_no; then
-      log "Rebuilding due to upstream change (user approved)."
-      rm -f "$IMG_OUT" "$HASHFILE"
-      build_image
-    else
-      log "Keeping existing image (user declined rebuild)."
-      qemu-img info "$IMG_OUT" || true
-    fi
-  else
-    log "Upstream unchanged (or check skipped). Keeping existing image."
-    qemu-img info "$IMG_OUT" || true
-  fi
-
-  exit 0
-fi
-
-# If image missing OR hash missing/failed -> rebuild
-if [[ -f "$IMG_OUT" && -f "$HASHFILE" ]]; then
-  log "WARNING: Local hash check failed; rebuilding."
-elif [[ -f "$IMG_OUT" && ! -f "$HASHFILE" ]]; then
-  log "Local image exists but no hash file; cannot verify."
-  if prompt_rebuild_5s_default_no; then
-    log "User approved rebuild."
-  else
-    log "Keeping existing image (unverified)."
-    qemu-img info "$IMG_OUT" || true
+# ---- If final image exists and is verified, skip unless forced ----
+if [[ "$FORCE_REBUILD" != "1" && -f "$BASE_IMG" && -f "$BASE_HASHFILE" ]]; then
+  log "Verifying existing final image: $BASE_HASHFILE"
+  if verify_hashfile "$BASE_HASHFILE"; then
+    log "Final image hash OK. Skipping rebuild."
+    qemu-img info "$BASE_IMG" || true
     exit 0
+  else
+    log "WARNING: Final image hash FAILED. Will rebuild."
+    rm -f "$BASE_IMG" "$BASE_HASHFILE"
   fi
 fi
 
-log "Rebuilding: removing old image + hash."
-rm -f "$IMG_OUT" "$HASHFILE"
-build_image
+# ---- Decide whether to fetch newest upstream cloud image ----
+need_cloud_download=0
+
+if [[ "$FORCE_REDOWNLOAD_CLOUD" == "1" ]]; then
+  log "FORCE_REDOWNLOAD_CLOUD=1 set: will redownload latest upstream."
+  need_cloud_download=1
+else
+  if [[ -f "$CLOUD_SRC" ]]; then
+    if [[ -f "$CLOUD_HASHFILE" ]]; then
+      log "Verifying existing newest cloud image: $CLOUD_HASHFILE"
+      if verify_hashfile "$CLOUD_HASHFILE"; then
+        log "Cloud image hash OK. Using existing: $CLOUD_SRC"
+      else
+        log "WARNING: Cloud image hash FAILED. Will redownload."
+        need_cloud_download=1
+      fi
+    else
+      log "Newest cloud image exists but no hash file found: $CLOUD_HASHFILE"
+      if prompt_yes_5s_default_no "Redownload newest upstream cloud image to ensure integrity?"; then
+        need_cloud_download=1
+      else
+        log "Using existing newest cloud image (unverified): $CLOUD_SRC"
+      fi
+    fi
+  else
+    log "Newest upstream image not found locally: $CLOUD_SRC"
+    if [[ "$AUTO_UPDATE_CLOUD" == "1" ]]; then
+      log "AUTO_UPDATE_CLOUD=1: will download newer version automatically."
+      need_cloud_download=1
+    else
+      if prompt_yes_5s_default_no "A newer Fedora Cloud image is available (${LATEST_CLOUD_FILE}). Download it now?"; then
+        need_cloud_download=1
+      else
+        log "Not downloading newer upstream image."
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+if [[ "$need_cloud_download" == "1" ]]; then
+  rm -f "$CLOUD_SRC" "$CLOUD_HASHFILE"
+  download_file "$CLOUD_URL" "$CLOUD_SRC"
+  write_hashfile "$CLOUD_SRC" "$CLOUD_HASHFILE"
+  log "Wrote hash: $CLOUD_HASHFILE"
+fi
+
+# ---- Prepare working base image ----
+log "Creating FoxOS base qcow2..."
+rm -f "$BASE_IMG" "$BASE_HASHFILE"
+qemu-img convert -O qcow2 "$CLOUD_SRC" "$BASE_IMG"
+
+# ---- Build cloud-init seed ----
+SEED_DIR="$(mktemp -d)"
+trap 'rm -rf "$SEED_DIR"' EXIT
+
+USER_DATA="$SEED_DIR/user-data"
+META_DATA="$SEED_DIR/meta-data"
+
+FOXOS_PASS_HASH='$6$aTsl7oq3GQkz7eGq$osmaiVfI6rOuhmmhONMtxpLt8IqPnPmtTQUINUY4erWDFa6iDVJfK3xXngVM1aQBXvxbpVtoqhSvL07Dvypkj1'
+
+cat > "$USER_DATA" <<EOF
+#cloud-config
+users:
+  - name: foxos
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: [wheel]
+    lock_passwd: false
+    passwd: ${FOXOS_PASS_HASH}
+
+ssh_pwauth: true
+disable_root: true
+chpasswd:
+  expire: false
+
+runcmd:
+  - [ bash, -lc, 'echo "[FOXOS] x86_64 base provisioning via cloud-init..."' ]
+  - [ bash, -lc, 'touch /var/lib/foxos-base-built' ]
+
+power_state:
+  mode: poweroff
+  message: "FoxOS x86_64 base provisioning complete - powering off"
+  timeout: 30
+  condition: true
+EOF
+
+cat > "$META_DATA" <<EOF
+instance-id: foxos-base-x86_64
+local-hostname: foxos-base-x86_64
+EOF
+
+log "Creating cloud-init seed image..."
+rm -f "$SEED_IMG"
+cloud-localds "$SEED_IMG" "$USER_DATA" "$META_DATA"
+
+# ---- Boot once under QEMU (x86_64) ----
+log "Booting QEMU x86_64 to apply cloud-init..."
+log "  Timeout: ${BUILD_TIMEOUT_MINUTES} minutes. VM should power off on its own."
+
+# KVM if available; falls back to TCG if not
+ACCEL_ARGS=()
+if [[ -e /dev/kvm ]]; then
+  ACCEL_ARGS=(-enable-kvm -cpu host)
+else
+  ACCEL_ARGS=(-cpu qemu64)
+fi
+
+if ! timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-x86_64 \
+  "${ACCEL_ARGS[@]}" \
+  -m 2048 \
+  -nographic \
+  -drive if=virtio,file="$BASE_IMG",format=qcow2 \
+  -drive if=virtio,file="$SEED_IMG",format=raw \
+  -netdev user,id=net0 \
+  -device virtio-net-pci,netdev=net0 \
+  -serial mon:stdio \
+  -no-reboot
+then
+  log "ERROR: QEMU timed out after ${BUILD_TIMEOUT_MINUTES} minutes."
+  log "The guest likely failed to boot or cloud-init did not power off."
+  exit 1
+fi
+
+log "QEMU exited successfully; proceeding to sparsify image..."
+export LIBGUESTFS_BACKEND=direct
+
+set +e
+virt-sparsify --in-place "$BASE_IMG"
+RC=$?
+set -e
+if [[ $RC -ne 0 ]]; then
+  log "WARNING: virt-sparsify failed (rc=$RC), continuing with non-sparsified image."
+fi
+
+write_hashfile "$BASE_IMG" "$BASE_HASHFILE"
+
+log "Done. Final x86_64 image:"
+qemu-img info "$BASE_IMG"
+log "Final image hash saved: $BASE_HASHFILE"
+log "FoxOS x86_64 base image ready: $BASE_IMG"

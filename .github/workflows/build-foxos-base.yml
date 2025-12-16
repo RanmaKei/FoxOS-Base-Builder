@@ -17,32 +17,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install virtualization & image tools
+      - name: Install image tools
         run: |
           sudo apt-get update
+          sudo apt-get install -y qemu-utils cloud-image-utils libguestfs-tools curl
 
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
-            echo "[CI] Installing x86_64 virtualization toolchain..."
-            sudo apt-get install -y qemu-kvm libvirt-daemon-system virtinst libguestfs-tools curl
+            sudo apt-get install -y qemu-system-x86
           else
-            echo "[CI] Installing aarch64 emulation + image toolchain..."
-            sudo apt-get install -y qemu-system-arm qemu-utils cloud-image-utils libguestfs-tools curl
+            sudo apt-get install -y qemu-system-arm
           fi
 
-      - name: Ensure libvirt is running (x86_64 only)
-        if: matrix.arch == 'x86_64'
-        run: |
-          sudo systemctl enable --now libvirtd
-          sudo virt-host-validate || true
-          sudo usermod -aG libvirt,kvm "$USER"
-          # Apply group change for this step context:
-          newgrp libvirt <<'EOF'
-          virsh -c qemu:///system list --all || true
-          EOF
-
-      - name: Fix virt-sparsify for permissions issue
-        run: |
-          sudo chmod +r /boot/vmlinuz-*
+      - name: Fix virt-sparsify permissions issue
+        run: sudo chmod +r /boot/vmlinuz-* || true
 
       - name: Make build scripts executable
         run: |
@@ -53,7 +40,6 @@ jobs:
         shell: bash
         env:
           BUILD_TIMEOUT_MINUTES: 45
-          AUTO_REBUILD_ON_UPSTREAM_CHANGE: "1"
           AUTO_UPDATE_CLOUD: "1"
         run: |
           set -euo pipefail
