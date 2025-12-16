@@ -77,7 +77,7 @@ upstream_changed() {
 
 build_image() {
   log "Starting virt-install (x86_64)..."
-  virt-install \
+  sudo virt-install --connect qemu:///system \
     --name foxos-base-x86_64 \
     --ram 2048 \
     --vcpus 2 \
@@ -89,7 +89,9 @@ build_image() {
     --graphics none \
     --virt-type qemu \
     --wait=-1 \
-    --noreboot
+    --noreboot \
+    --noautoconsole
+
 
   set +e
   virt-sparsify --in-place "$IMG"

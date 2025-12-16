@@ -33,6 +33,7 @@ jobs:
         if: matrix.arch == 'x86_64'
         run: |
           sudo systemctl enable --now libvirtd
+          sudo virt-host-validate || true
           sudo usermod -aG libvirt,kvm "$USER"
           # Apply group change for this step context:
           newgrp libvirt <<'EOF'
