@@ -48,16 +48,16 @@ jobs:
         shell: bash
         env:
           BUILD_TIMEOUT_MINUTES: 45
-          AUTO_REBUILD_ON_UPSTREAM_CHANGE: "1"  # x86 script
-          AUTO_UPDATE_CLOUD: "1"                # arm script
-
+          AUTO_REBUILD_ON_UPSTREAM_CHANGE: "1"
+          AUTO_UPDATE_CLOUD: "1"
         run: |
+          set -euo pipefail
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             echo "[CI] Building x86_64 base image..."
-            scripts/build-foxos-base-x86_64.sh
+            bash scripts/build-foxos-base-x86_64.sh
           else
             echo "[CI] Building aarch64 base image under QEMU emulation..."
-            scripts/build-foxos-base-aarch64.sh
+            bash scripts/build-foxos-base-aarch64.sh
           fi
 
       - name: Compress qcow2 artifact (${{ matrix.arch }})
