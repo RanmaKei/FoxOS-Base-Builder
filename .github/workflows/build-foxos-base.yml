@@ -45,6 +45,7 @@ jobs:
           chmod +x scripts/build-foxos-base-aarch64.sh
 
       - name: Build FoxOS base image (${{ matrix.arch }})
+        shell: bash
         env:
           BUILD_TIMEOUT_MINUTES: 45
           AUTO_REBUILD_ON_UPSTREAM_CHANGE: "1"  # x86 script

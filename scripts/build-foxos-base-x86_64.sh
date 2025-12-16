@@ -17,8 +17,8 @@ UPSTREAM_STAMP="$OUTDIR/.fedora-treeinfo-x86_64.sha256"
 
 mkdir -p "$OUTDIR"
 
-log(){ echo "[FOXOS-BUILDER] $*"; }
-have_tty(){ [[ -t 0 && -t 1 ]]; }
+log() { echo "[FOXOS-BUILDER] $*"; }
+have_tty() { [ -t 0 ] && [ -t 1 ]; }
 
 # Controls
 FORCE_REBUILD="${FORCE_REBUILD:-0}"                 # always rebuild
