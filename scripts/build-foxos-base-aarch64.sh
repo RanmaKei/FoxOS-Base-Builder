@@ -184,7 +184,7 @@ runcmd:
 
 power_state:
   mode: poweroff
-  message: "FoxOS ARM base provisioning complete – powering off"
+  message: "FoxOS ARM base provisioning complete - powering off"
   timeout: 30
   condition: true
 EOF
