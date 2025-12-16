@@ -39,6 +39,10 @@ jobs:
           virsh -c qemu:///system list --all || true
           EOF
 
+      - name: Fix virt-sparsify for permissions issue
+        run: |
+          sudo chmod +r /boot/vmlinuz-*
+
       - name: Make build scripts executable
         run: |
           chmod +x scripts/build-foxos-base-x86_64.sh
