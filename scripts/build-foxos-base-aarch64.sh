@@ -20,9 +20,9 @@ BASE_HASHFILE="$BASE_IMG.sha256"
 SEED_IMG="$OUTDIR/foxos-seed-aarch64.iso"
 
 # Controls
-FORCE_REBUILD="${FORCE_REBUILD:-0}"                  # force rebuild final image
-AUTO_UPDATE_CLOUD="${AUTO_UPDATE_CLOUD:-0}"          # only download when newer exists (CI-friendly)
-FORCE_REDOWNLOAD_CLOUD="${FORCE_REDOWNLOAD_CLOUD:-0}"# always redownload latest (hammer)
+FORCE_REBUILD="${FORCE_REBUILD:-0}"                   # force rebuild final image
+AUTO_UPDATE_CLOUD="${AUTO_UPDATE_CLOUD:-0}"           # only download when newer exists (CI-friendly)
+FORCE_REDOWNLOAD_CLOUD="${FORCE_REDOWNLOAD_CLOUD:-0}" # always redownload latest (hammer)
 
 log() { echo "[FOXOS-BUILDER] $*"; }
 have_tty() { [ -t 0 ] && [ -t 1 ]; }
