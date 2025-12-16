@@ -22,7 +22,7 @@ have_tty() { [ -t 0 ] && [ -t 1 ]; }
 
 # Controls
 FORCE_REBUILD="${FORCE_REBUILD:-0}"                 # always rebuild
-AUTO_REBUILD_ON_UPSTREAM_CHANGE="${AUTO_REBUILD_ON_UPSTREAM_CHANGE:-0}"  # CI-friendly: rebuild automatically when upstream changes
+AUTO_REBUILD_ON_UPSTREAM_CHANGE="${AUTO_REBUILD_ON_UPSTREAM_CHANGE:-0}" # CI-friendly: rebuild automatically when upstream changes
 
 prompt_rebuild_5s_default_no() {
   if ! have_tty; then
