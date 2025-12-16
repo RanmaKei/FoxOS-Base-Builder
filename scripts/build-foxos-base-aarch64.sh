@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+[ -n "${BASH_VERSION:-}" ] || { echo "ERROR: This script must be run with bash." >&2; exit 2; }
 set -euo pipefail
 
 BUILD_TIMEOUT_MINUTES="${BUILD_TIMEOUT_MINUTES:-45}"
