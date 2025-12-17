@@ -198,10 +198,11 @@ log "  Timeout: ${BUILD_TIMEOUT_MINUTES} minutes. VM should power off on its own
 
 # KVM if available; falls back to TCG if not
 ACCEL_ARGS=()
-if [[ -e /dev/kvm ]]; then
+if [[ -r /dev/kvm && -w /dev/kvm ]]; then
   ACCEL_ARGS=(-enable-kvm -cpu host)
 else
-  ACCEL_ARGS=(-cpu qemu64)
+  log "KVM not usable; running without acceleration (TCG)."
+  ACCEL_ARGS=(-accel tcg -cpu qemu64)
 fi
 
 if ! timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-x86_64 \
