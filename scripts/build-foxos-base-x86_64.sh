@@ -16,8 +16,8 @@ CLOUD_DIR_URL="https://archives.fedoraproject.org/pub/fedora/linux/releases/42/C
 BASE_IMG="$OUTDIR/FoxOS-Base-x86_64.qcow2"
 BASE_HASHFILE="$BASE_IMG.sha256"
 
-# Cloud-init seed ISO
-SEED_IMG="$OUTDIR/foxos-seed-x86_64.iso"
+# Cloud-init seed IMG
+SEED_IMG="$OUTDIR/foxos-x86-seed.img"
 
 # Controls
 FORCE_REBUILD="${FORCE_REBUILD:-0}"                  # force rebuild final image
