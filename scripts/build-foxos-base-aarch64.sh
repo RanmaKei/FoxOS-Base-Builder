@@ -212,6 +212,16 @@ do
   [[ -f "$f" ]] && UEFI_CODE="$f" && break
 done
 
+# QEMU virt machine pflash devices are 64MiB; some distros ship 2MiB firmware blobs.
+PFLASH_BYTES=$((64 * 1024 * 1024))
+
+UEFI_CODE_PAD="$OUTDIR/QEMU_EFI_CODE.aarch64.fd"
+log "Preparing padded UEFI CODE: $UEFI_CODE_PAD (${PFLASH_BYTES} bytes) from $UEFI_CODE"
+
+rm -f "$UEFI_CODE_PAD"
+dd if=/dev/zero of="$UEFI_CODE_PAD" bs=1 count=0 seek="$PFLASH_BYTES" >/dev/null 2>&1
+dd if="$UEFI_CODE" of="$UEFI_CODE_PAD" conv=notrunc >/dev/null 2>&1
+
 if [[ -z "$UEFI_CODE" ]]; then
   log "ERROR: No aarch64 UEFI firmware found. Install qemu-efi-aarch64 (or AAVMF/edk2)." >&2
   exit 1
@@ -220,7 +230,7 @@ fi
 UEFI_VARS="$OUTDIR/QEMU_VARS.aarch64.fd"
 
 # Required size should match the CODE flash size (commonly 64MiB)
-REQ_BYTES="$(stat -c '%s' "$UEFI_CODE")"
+REQ_BYTES="$PFLASH_BYTES"
 
 # Find a vars template if available
 UEFI_VARS_TEMPLATE=""
@@ -256,7 +266,7 @@ timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -cpu cortex-a72 \
   -m 2048 \
   -nographic \
-  -drive if=pflash,format=raw,readonly=on,file="$UEFI_CODE" \
+  -drive if=pflash,format=raw,readonly=on,file="$UEFI_CODE_PAD" \
   -drive if=pflash,format=raw,file="$UEFI_VARS" \
   -drive if=virtio,file="$BASE_IMG",format=qcow2 \
   -drive if=virtio,file="$SEED_IMG",format=raw \
