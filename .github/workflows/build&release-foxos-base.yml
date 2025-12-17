@@ -1,7 +1,11 @@
-name: Build FoxOS Base Images
+name: Build & Release FoxOS Base Images
 
 on:
-  workflow_dispatch: {}
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: write
 
 jobs:
   build-base:
@@ -46,38 +50,61 @@ jobs:
             bash scripts/build-foxos-base-aarch64.sh
           fi
 
-      - name: Create distro qcow2 (internal compression) (${{ matrix.arch }})
+      - name: Produce release qcow2 (internal compression, stable name) (${{ matrix.arch }})
         shell: bash
         run: |
           set -euo pipefail
           SRC="output/FoxOS-Base-${{ matrix.arch }}.qcow2"
-          DST="output/FoxOS-Base-${{ matrix.arch }}.qcow2"   # or keep -compressed if you prefer
-          RAW="output/FoxOS-Base-${{ matrix.arch }}-raw.qcow2"
+          OUT="output/FoxOS-Base-${{ matrix.arch }}.qcow2"
 
           if [[ ! -f "$SRC" ]]; then
             echo "[CI] ERROR: Expected qcow2 not found: $SRC" >&2
             exit 1
           fi
 
-          # Preserve raw build output separately
-          cp -f "$SRC" "$RAW"
+          # Write to a temp file first, then atomically replace (safer)
+          TMP="$(mktemp --suffix=.qcow2)"
+          qemu-img convert -O qcow2 -c "$SRC" "$TMP"
+          mv -f "$TMP" "$OUT"
 
-          # Replace SRC with internally-compressed distro-friendly qcow2
-          qemu-img convert -O qcow2 -c "$RAW" "$DST"
-
-          echo "[CI] Outputs:"
           ls -lh output
 
-      - name: Upload distro qcow2 artifact (${{ matrix.arch }})
+      - name: Upload artifact (${{ matrix.arch }})
         uses: actions/upload-artifact@v4
         with:
-          name: FoxOS-Base-${{ matrix.arch }}-qcow2
+          name: FoxOS-Base-${{ matrix.arch }}
           path: output/FoxOS-Base-${{ matrix.arch }}.qcow2
-          retention-days: 30
-
-      - name: Upload raw qcow2 artifact (${{ matrix.arch }})
-        uses: actions/upload-artifact@v4
-        with:
-          name: FoxOS-Base-${{ matrix.arch }}-raw-qcow2
-          path: output/FoxOS-Base-${{ matrix.arch }}-raw.qcow2
           retention-days: 7
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build-base
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten dist folder (so assets aren’t nested)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find dist -type f -name "*.qcow2" -exec cp -f {} release/ \;
+          ls -lh release
+
+      - name: Publish Release (tag)
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FoxOS Base ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          (cd release && sha256sum *.qcow2 > SHA256SUMS.txt)
+          cat release/SHA256SUMS.txt
