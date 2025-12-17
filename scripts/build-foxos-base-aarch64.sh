@@ -236,6 +236,17 @@ REQ_BYTES="$(stat -c '%s' "$UEFI_CODE")"
 if [[ -n "$UEFI_VARS_TEMPLATE" ]]; then
   log "Using UEFI VARS template: $UEFI_VARS_TEMPLATE"
   cp -f "$UEFI_VARS_TEMPLATE" "$UEFI_VARS"
+
+  # Ensure VARS file matches CODE flash size (pad or recreate if needed)
+  CUR_BYTES="$(stat -c '%s' "$UEFI_VARS")"
+  if [[ "$CUR_BYTES" -ne "$REQ_BYTES" ]]; then
+    log "Resizing UEFI VARS to ${REQ_BYTES} bytes (was ${CUR_BYTES})."
+    # Recreate as zeroed file, then overlay the template at the start
+    TMP_VARS="$(mktemp)"
+    dd if=/dev/zero of="$TMP_VARS" bs=1 count=0 seek="$REQ_BYTES" >/dev/null 2>&1
+    dd if="$UEFI_VARS" of="$TMP_VARS" conv=notrunc >/dev/null 2>&1
+    mv -f "$TMP_VARS" "$UEFI_VARS"
+  fi
 else
   CUR_BYTES=0
   [[ -f "$UEFI_VARS" ]] && CUR_BYTES="$(stat -c '%s' "$UEFI_VARS")"
@@ -245,7 +256,6 @@ else
     dd if=/dev/zero of="$UEFI_VARS" bs=1 count=0 seek="$REQ_BYTES" >/dev/null 2>&1
   fi
 fi
-
 
 log "Using UEFI firmware: $UEFI_CODE"
 
