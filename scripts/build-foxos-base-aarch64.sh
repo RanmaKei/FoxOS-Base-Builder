@@ -218,9 +218,34 @@ if [[ -z "$UEFI_CODE" ]]; then
 fi
 
 UEFI_VARS="$OUTDIR/QEMU_VARS.aarch64.fd"
-if [[ ! -f "$UEFI_VARS" ]]; then
-  dd if=/dev/zero of="$UEFI_VARS" bs=1M count=64 >/dev/null 2>&1
+
+# Prefer packaged VARS template if present
+UEFI_VARS_TEMPLATE=""
+for t in \
+  /usr/share/qemu-efi-aarch64/QEMU_VARS.fd \
+  /usr/share/AAVMF/AAVMF_VARS.fd \
+  /usr/share/edk2/aarch64/QEMU_VARS.fd \
+  /usr/share/edk2-armvirt/aarch64/QEMU_VARS.fd
+do
+  [[ -f "$t" ]] && UEFI_VARS_TEMPLATE="$t" && break
+done
+
+# Required size should match the CODE flash size (commonly 64MiB)
+REQ_BYTES="$(stat -c '%s' "$UEFI_CODE")"
+
+if [[ -n "$UEFI_VARS_TEMPLATE" ]]; then
+  log "Using UEFI VARS template: $UEFI_VARS_TEMPLATE"
+  cp -f "$UEFI_VARS_TEMPLATE" "$UEFI_VARS"
+else
+  CUR_BYTES=0
+  [[ -f "$UEFI_VARS" ]] && CUR_BYTES="$(stat -c '%s' "$UEFI_VARS")"
+  if [[ "$CUR_BYTES" -ne "$REQ_BYTES" ]]; then
+    log "Creating/resizing UEFI VARS to ${REQ_BYTES} bytes (was ${CUR_BYTES})."
+    rm -f "$UEFI_VARS"
+    dd if=/dev/zero of="$UEFI_VARS" bs=1 count=0 seek="$REQ_BYTES" >/dev/null 2>&1
+  fi
 fi
+
 
 log "Using UEFI firmware: $UEFI_CODE"
 
