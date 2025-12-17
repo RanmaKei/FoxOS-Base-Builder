@@ -162,7 +162,7 @@ trap 'rm -rf "$SEED_DIR"' EXIT
 USER_DATA="$SEED_DIR/user-data.yaml"
 META_DATA="$SEED_DIR/meta-data.yaml"
 
-FOXOS_PASS_HASH='$6$aTsl7oq3GQkz7eGq$osmaiVfI6rOuhmmhONMtxpLt8IqPnPmtTQUINUY4erWDFa6iDVJfK3xXngVM1aQBXvxbpVtoqhSvL07Dvypkj1'
+FOXOS_PASS_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJji/5So7K4znFGBbEKsH54x5PH8yy4eXklnK6F2Sh9m foxos-bootstrap'
 
 cat > "$USER_DATA" <<EOF
 #cloud-config
@@ -170,16 +170,17 @@ users:
   - name: foxos
     sudo: ALL=(ALL) NOPASSWD:ALL
     groups: [wheel]
-    lock_passwd: false
-    passwd: ${FOXOS_PASS_HASH}
+    lock_passwd: true
+    ssh_authorized_keys:
+      - "${FOXOS_PASS_KEY}"
 
-ssh_pwauth: true
+ssh_pwauth: false
 disable_root: true
 chpasswd:
   expire: false
 
 runcmd:
-  - [ bash, -c, 'echo "[FOXOS] ARM base provisioning via cloud-init..."' ]
+  - [ bash, -c, 'echo "[FOXOS] Base image initialized with bootstrap SSH key"' ]
   - [ bash, -c, 'touch /var/lib/foxos-base-built' ]
 
 power_state:
@@ -286,9 +287,9 @@ elif [[ $RC -ne 0 ]]; then
 fi
 
 # Best-effort: extract cloud-init logs even on failure/timeout
-log "Attempting to extract cloud-init logs from image (best-effort)..."
-sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init.log 2>/dev/null | tail -n 200 || true
-sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init-output.log 2>/dev/null | tail -n 200 || true
+#log "Attempting to extract cloud-init logs from image (best-effort)..."
+#sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init.log 2>/dev/null | tail -n 200 || true
+#sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init-output.log 2>/dev/null | tail -n 200 || true
 
 if [[ $RC -ne 0 ]]; then
   exit 1
