@@ -262,6 +262,8 @@ log "UEFI_VARS size: $(stat -c '%s' "$UEFI_VARS")"
 log "Using UEFI firmware: $UEFI_CODE"
 
 set +e
+QEMU_LOG="$OUTDIR/qemu-serial.log"
+
 timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -machine virt \
   -cpu cortex-a72 \
@@ -275,9 +277,15 @@ timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -device virtio-net-device,netdev=net0 \
   -serial stdio \
   -monitor none \
-  -no-reboot
-RC=$?
+  -no-reboot \
+  |& tee "$QEMU_LOG"
+RC=${PIPESTATUS[0]}
 set -e
+
+if grep -q "Press Enter to continue" "$QEMU_LOG"; then
+  log "ERROR: Guest entered emergency mode and is waiting for console input."
+  exit 1
+fi
 
 if [[ $RC -eq 124 ]]; then
   log "ERROR: QEMU timed out after ${BUILD_TIMEOUT_MINUTES} minutes." >&2
@@ -287,9 +295,17 @@ elif [[ $RC -ne 0 ]]; then
 fi
 
 # Best-effort: extract cloud-init logs even on failure/timeout
-#log "Attempting to extract cloud-init logs from image (best-effort)..."
-#sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init.log 2>/dev/null | tail -n 200 || true
-#sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init-output.log 2>/dev/null | tail -n 200 || true
+log "Attempting to extract boot + cloud-init logs from image (best-effort)..."
+
+sudo virt-cat -a "$BASE_IMG" -i /etc/fstab 2>/dev/null || true
+sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init.log 2>/dev/null | tail -n 300 || true
+sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init-output.log 2>/dev/null | tail -n 300 || true
+
+# Fedora/dracut often writes this when dropping to emergency
+sudo virt-cat -a "$BASE_IMG" -i /run/initramfs/rdsosreport.txt 2>/dev/null | tail -n 300 || true
+
+# If journald is persistent on that image, grab the last boot logs
+sudo virt-ls  -a "$BASE_IMG" -i /var/log/journal 2>/dev/null || true
 
 if [[ $RC -ne 0 ]]; then
   exit 1
