@@ -219,7 +219,10 @@ fi
 
 UEFI_VARS="$OUTDIR/QEMU_VARS.aarch64.fd"
 
-# Prefer packaged VARS template if present
+# Required size should match the CODE flash size (commonly 64MiB)
+REQ_BYTES="$(stat -c '%s' "$UEFI_CODE")"
+
+# Find a vars template if available
 UEFI_VARS_TEMPLATE=""
 for t in \
   /usr/share/qemu-efi-aarch64/QEMU_VARS.fd \
@@ -230,32 +233,20 @@ do
   [[ -f "$t" ]] && UEFI_VARS_TEMPLATE="$t" && break
 done
 
-# Required size should match the CODE flash size (commonly 64MiB)
-REQ_BYTES="$(stat -c '%s' "$UEFI_CODE")"
+# Always recreate vars to the required size, then (optionally) seed it with template bytes
+log "Creating UEFI VARS file: $UEFI_VARS (${REQ_BYTES} bytes)"
+rm -f "$UEFI_VARS"
+dd if=/dev/zero of="$UEFI_VARS" bs=1 count=0 seek="$REQ_BYTES" >/dev/null 2>&1
 
 if [[ -n "$UEFI_VARS_TEMPLATE" ]]; then
-  log "Using UEFI VARS template: $UEFI_VARS_TEMPLATE"
-  cp -f "$UEFI_VARS_TEMPLATE" "$UEFI_VARS"
-
-  # Ensure VARS file matches CODE flash size (pad or recreate if needed)
-  CUR_BYTES="$(stat -c '%s' "$UEFI_VARS")"
-  if [[ "$CUR_BYTES" -ne "$REQ_BYTES" ]]; then
-    log "Resizing UEFI VARS to ${REQ_BYTES} bytes (was ${CUR_BYTES})."
-    # Recreate as zeroed file, then overlay the template at the start
-    TMP_VARS="$(mktemp)"
-    dd if=/dev/zero of="$TMP_VARS" bs=1 count=0 seek="$REQ_BYTES" >/dev/null 2>&1
-    dd if="$UEFI_VARS" of="$TMP_VARS" conv=notrunc >/dev/null 2>&1
-    mv -f "$TMP_VARS" "$UEFI_VARS"
-  fi
+  log "Seeding UEFI VARS from template: $UEFI_VARS_TEMPLATE"
+  dd if="$UEFI_VARS_TEMPLATE" of="$UEFI_VARS" conv=notrunc >/dev/null 2>&1
 else
-  CUR_BYTES=0
-  [[ -f "$UEFI_VARS" ]] && CUR_BYTES="$(stat -c '%s' "$UEFI_VARS")"
-  if [[ "$CUR_BYTES" -ne "$REQ_BYTES" ]]; then
-    log "Creating/resizing UEFI VARS to ${REQ_BYTES} bytes (was ${CUR_BYTES})."
-    rm -f "$UEFI_VARS"
-    dd if=/dev/zero of="$UEFI_VARS" bs=1 count=0 seek="$REQ_BYTES" >/dev/null 2>&1
-  fi
+  log "No UEFI VARS template found; using zeroed VARS."
 fi
+
+log "UEFI_CODE size: $(stat -c '%s' "$UEFI_CODE")"
+log "UEFI_VARS size: $(stat -c '%s' "$UEFI_VARS")"
 
 log "Using UEFI firmware: $UEFI_CODE"
 
