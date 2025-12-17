@@ -162,7 +162,7 @@ trap 'rm -rf "$SEED_DIR"' EXIT
 USER_DATA="$SEED_DIR/user-data.yaml"
 META_DATA="$SEED_DIR/meta-data.yaml"
 
-FOXOS_PASS_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJji/5So7K4znFGBbEKsH54x5PH8yy4eXklnK6F2Sh9m foxos-bootstrap'
+FOXOS_PASS_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPhFLHs/EixrDUX9i6rzQmjHeijwgDxBFWafTGy8YngA foxos-bootstrap'
 
 cat > "$USER_DATA" <<EOF
 #cloud-config
