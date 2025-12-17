@@ -20,9 +20,9 @@ BASE_HASHFILE="$BASE_IMG.sha256"
 SEED_IMG="$OUTDIR/foxos-x86-seed.img"
 
 # Controls
-FORCE_REBUILD="${FORCE_REBUILD:-0}"                  # force rebuild final image
-AUTO_UPDATE_CLOUD="${AUTO_UPDATE_CLOUD:-0}"          # CI-friendly: download newer upstream automatically
-FORCE_REDOWNLOAD_CLOUD="${FORCE_REDOWNLOAD_CLOUD:-0}" # always redownload latest upstream
+FORCE_REBUILD="${FORCE_REBUILD:-0}"                    # force rebuild final image
+AUTO_UPDATE_CLOUD="${AUTO_UPDATE_CLOUD:-0}"            # CI-friendly: download newer upstream automatically
+FORCE_REDOWNLOAD_CLOUD="${FORCE_REDOWNLOAD_CLOUD:-0}"  #always redownload latest upstream
 
 log() { echo "[FOXOS-BUILDER] $*"; }
 have_tty() { [[ -t 0 && -t 1 ]]; }
