@@ -272,7 +272,8 @@ timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -drive if=virtio,file="$SEED_IMG",format=raw \
   -netdev user,id=net0 \
   -device virtio-net-device,netdev=net0 \
-  -serial mon:stdio \
+  -serial stdio \
+  -monitor none \
   -no-reboot
 RC=$?
 set -e
