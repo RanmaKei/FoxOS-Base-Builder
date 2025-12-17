@@ -236,7 +236,7 @@ timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -drive if=virtio,file="$SEED_IMG",format=raw \
   -netdev user,id=net0 \
   -device virtio-net-device,netdev=net0 \
-  -serial stdio \
+  -serial mon:stdio
   -no-reboot
 RC=$?
 set -e
@@ -256,7 +256,6 @@ sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init-output.log 2>/dev/null | tai
 if [[ $RC -ne 0 ]]; then
   exit 1
 fi
-
 
 log "QEMU exited successfully; proceeding to sparsify image..."
 export LIBGUESTFS_BACKEND=direct
