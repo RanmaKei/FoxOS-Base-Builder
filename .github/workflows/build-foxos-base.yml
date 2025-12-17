@@ -20,7 +20,7 @@ jobs:
       - name: Install image tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-utils cloud-image-utils libguestfs-tools curl
+          sudo apt-get install -y qemu-utils cloud-image-utils libguestfs-tools curl qemu-efi-aarch64
 
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             sudo apt-get install -y qemu-system-x86
@@ -71,3 +71,4 @@ jobs:
         with:
           name: FoxOS-Base-${{ matrix.arch }}
           path: output/FoxOS-Base-${{ matrix.arch }}-compressed.qcow2
+          retention-days: 30

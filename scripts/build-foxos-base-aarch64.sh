@@ -201,22 +201,62 @@ cloud-localds "$SEED_IMG" "$USER_DATA" "$META_DATA"
 log "Booting QEMU aarch64 to apply cloud-init..."
 log "  Timeout: ${BUILD_TIMEOUT_MINUTES} minutes. VM should power off on its own."
 
-if ! timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
+# ---- Locate aarch64 UEFI firmware ----
+UEFI_CODE=""
+for f in \
+  /usr/share/qemu-efi-aarch64/QEMU_EFI.fd \
+  /usr/share/AAVMF/AAVMF_CODE.fd \
+  /usr/share/edk2/aarch64/QEMU_EFI.fd \
+  /usr/share/edk2-armvirt/aarch64/QEMU_EFI.fd
+do
+  [[ -f "$f" ]] && UEFI_CODE="$f" && break
+done
+
+if [[ -z "$UEFI_CODE" ]]; then
+  log "ERROR: No aarch64 UEFI firmware found. Install qemu-efi-aarch64 (or AAVMF/edk2)." >&2
+  exit 1
+fi
+
+UEFI_VARS="$OUTDIR/QEMU_VARS.aarch64.fd"
+if [[ ! -f "$UEFI_VARS" ]]; then
+  dd if=/dev/zero of="$UEFI_VARS" bs=1M count=64 >/dev/null 2>&1
+fi
+
+log "Using UEFI firmware: $UEFI_CODE"
+
+set +e
+timeout "${BUILD_TIMEOUT_SECONDS}" qemu-system-aarch64 \
   -machine virt \
   -cpu cortex-a72 \
   -m 2048 \
   -nographic \
+  -drive if=pflash,format=raw,readonly=on,file="$UEFI_CODE" \
+  -drive if=pflash,format=raw,file="$UEFI_VARS" \
   -drive if=virtio,file="$BASE_IMG",format=qcow2 \
   -drive if=virtio,file="$SEED_IMG",format=raw \
   -netdev user,id=net0 \
   -device virtio-net-device,netdev=net0 \
-  -serial mon:stdio \
+  -serial stdio \
   -no-reboot
-then
-  log "ERROR: QEMU timed out after ${BUILD_TIMEOUT_MINUTES} minutes."
-  log "The guest likely failed to boot or cloud-init did not power off."
+RC=$?
+set -e
+
+if [[ $RC -eq 124 ]]; then
+  log "ERROR: QEMU timed out after ${BUILD_TIMEOUT_MINUTES} minutes." >&2
+  log "The guest likely failed to boot or cloud-init did not power off." >&2
+elif [[ $RC -ne 0 ]]; then
+  log "ERROR: QEMU exited with rc=$RC (boot failure)." >&2
+fi
+
+# Best-effort: extract cloud-init logs even on failure/timeout
+log "Attempting to extract cloud-init logs from image (best-effort)..."
+sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init.log 2>/dev/null | tail -n 200 || true
+sudo virt-cat -a "$BASE_IMG" -i /var/log/cloud-init-output.log 2>/dev/null | tail -n 200 || true
+
+if [[ $RC -ne 0 ]]; then
   exit 1
 fi
+
 
 log "QEMU exited successfully; proceeding to sparsify image..."
 export LIBGUESTFS_BACKEND=direct
