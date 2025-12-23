@@ -12,6 +12,10 @@ mkdir -p "$OUTDIR"
 # Upstream Fedora Cloud images dir (x86_64)
 CLOUD_DIR_URL="https://archives.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/"
 
+# Instance Identity
+INSTANCE_ID="foxos-base-x86_64-$(date -u +%Y%m%d%H%M%S)"
+HOSTNAME="foxos-base"
+
 # Final artifact
 BASE_IMG="$OUTDIR/FoxOS-Base-x86_64.qcow2"
 BASE_HASHFILE="$BASE_IMG.sha256"
@@ -177,6 +181,13 @@ runcmd:
   - [ bash, -c, 'echo "[FOXOS] Base image initialized with bootstrap SSH key"' ]
   - [ bash, -c, 'touch /var/lib/foxos-base-built' ]
 
+  # Reset identity for cloning
+  - [ bash, -c, 'truncate -s 0 /etc/machine-id || true' ]
+  - [ bash, -c, 'rm -f /var/lib/dbus/machine-id || true' ]
+
+  # Make cloud-init run fresh on clones
+  - [ bash, -c, 'cloud-init clean --logs || true' ]
+
 power_state:
   mode: poweroff
   message: "FoxOS x86_64 base provisioning complete - powering off"
@@ -185,8 +196,8 @@ power_state:
 EOF
 
 cat > "$META_DATA" <<EOF
-instance-id: foxos-base-x86_64
-local-hostname: foxos-base-x86_64
+instance-id: ${INSTANCE_ID}
+local-hostname: ${HOSTNAME}
 EOF
 
 log "Creating cloud-init seed image..."
