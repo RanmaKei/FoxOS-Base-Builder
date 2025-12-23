@@ -159,6 +159,22 @@ log "Creating FoxOS base qcow2..."
 rm -f "$BASE_IMG" "$BASE_HASHFILE"
 qemu-img convert -O qcow2 "$CLOUD_SRC" "$BASE_IMG"
 
+# ---------- Patch fstab before first boot (avoid emergency mode on missing ESP) ----------
+log "Patching /etc/fstab inside base image (pre-boot hardening)..."
+
+# Best effort: show fstab before
+sudo virt-cat -a "$BASE_IMG" -i /etc/fstab 2>/dev/null || true
+
+# Make /boot/efi mount non-fatal if the ESP UUID is missing/mismatched
+# (common when the upstream image layout changes or ESP is absent in some virt configs)
+sudo virt-edit -a "$BASE_IMG" -i /etc/fstab -e '
+  s#^(UUID=[^[:space:]]+[[:space:]]+/boot/efi[[:space:]]+vfat[[:space:]]+)([^[:space:]]+)#\1\2,nofail,x-systemd.device-timeout=5s#
+' || true
+
+# Show fstab after
+log "fstab after patch:"
+sudo virt-cat -a "$BASE_IMG" -i /etc/fstab 2>/dev/null || true
+
 # ---------- Build cloud-init seed ----------
 SEED_DIR="$(mktemp -d)"
 trap 'rm -rf "$SEED_DIR"' EXIT
