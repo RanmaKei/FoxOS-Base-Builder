@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           SRC="output/FoxOS-Base-${{ matrix.arch }}.qcow2"
-          OUT="output/FoxOS-Base-${{ matrix.arch }}.qcow2"
+          OUT="output/FoxOS-Base-${{ matrix.arch }}-${APP_VERSION}.qcow2"
 
           if [[ ! -f "$SRC" ]]; then
             echo "[CI] ERROR: Expected qcow2 not found: $SRC" >&2
