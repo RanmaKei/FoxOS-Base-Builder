@@ -17,6 +17,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Parse tag (app version)
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          FULL_TAG="${{ github.ref_name }}"
+          APP_VERSION="${FULL_TAG%%-*}"
+
+          echo "full_tag=$FULL_TAG" >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+          # optional: still export to env for shell steps
+          echo "FULL_TAG=$FULL_TAG" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+
       - name: Install image tools
         run: |
           sudo apt-get update
