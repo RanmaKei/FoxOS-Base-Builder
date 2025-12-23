@@ -159,21 +159,20 @@ log "Creating FoxOS base qcow2..."
 rm -f "$BASE_IMG" "$BASE_HASHFILE"
 qemu-img convert -O qcow2 "$CLOUD_SRC" "$BASE_IMG"
 
-# ---------- Patch fstab before first boot (avoid emergency mode on missing ESP) ----------
+# ---------- Patch fstab (pre-boot hardening) ----------
 log "Patching /etc/fstab inside base image (pre-boot hardening)..."
+export LIBGUESTFS_BACKEND=direct
 
-# Best effort: show fstab before
-sudo virt-cat -a "$BASE_IMG" -i /etc/fstab 2>/dev/null || true
+# Add nofail + shorter timeout for /boot/efi (avoid emergency if EFI UUID is absent in QEMU)
+sudo virt-edit -a "$BASE_IMG" /etc/fstab -e \
+'s@(^[[:space:]]*[^#[:space:]][[:space:]]+/boot/efi[[:space:]]+vfat[[:space:]]+)([^[:space:]]+)@\1\2,nofail,x-systemd.device-timeout=10@' || {
+  log "ERROR: virt-edit fstab patch failed" >&2
+  exit 1
+}
 
-# Make /boot/efi mount non-fatal if the ESP UUID is missing/mismatched
-# (common when the upstream image layout changes or ESP is absent in some virt configs)
-sudo virt-edit -a "$BASE_IMG" -i /etc/fstab -e '
-  s#^(UUID=[^[:space:]]+[[:space:]]+/boot/efi[[:space:]]+vfat[[:space:]]+)([^[:space:]]+)#\1\2,nofail,x-systemd.device-timeout=5s#
-' || true
-
-# Show fstab after
 log "fstab after patch:"
-sudo virt-cat -a "$BASE_IMG" -i /etc/fstab 2>/dev/null || true
+sudo virt-cat -a "$BASE_IMG" /etc/fstab | sed -n '1,200p'
+
 
 # ---------- Build cloud-init seed ----------
 SEED_DIR="$(mktemp -d)"
@@ -248,12 +247,13 @@ log "Preparing padded UEFI CODE: $UEFI_CODE_PAD (${PFLASH_BYTES} bytes) from $UE
 
 rm -f "$UEFI_CODE_PAD"
 dd if=/dev/zero of="$UEFI_CODE_PAD" bs=1 count=0 seek="$PFLASH_BYTES" >/dev/null 2>&1
-dd if="$UEFI_CODE" of="$UEFI_CODE_PAD" conv=notrunc >/dev/null 2>&1
 
 if [[ -z "$UEFI_CODE" ]]; then
   log "ERROR: No aarch64 UEFI firmware found. Install qemu-efi-aarch64 (or AAVMF/edk2)." >&2
   exit 1
 fi
+
+dd if="$UEFI_CODE" of="$UEFI_CODE_PAD" conv=notrunc >/dev/null 2>&1
 
 UEFI_VARS="$OUTDIR/QEMU_VARS.aarch64.fd"
 
